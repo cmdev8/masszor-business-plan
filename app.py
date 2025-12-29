@@ -17,30 +17,51 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+MONTHS = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+]
+
 
 # ----------------------------
 # Helpers
 # ----------------------------
-def triangular_draw(rng: np.random.Generator, left: float, mode: float, right: float, size):
+def triangular_draw(
+    rng: np.random.Generator, left: float, mode: float, right: float, size
+):
     # safety clamp + enforce order
     left_ = min(left, mode, right)
     right_ = max(left_, mode, right)
     mode_ = min(max(mode, left_), right_)
     return rng.triangular(left_, mode_, right_, size=size)
 
+
 def pct(a: np.ndarray, q: float) -> float:
     return float(np.percentile(a, q))
+
 
 def format_huf(x: float) -> str:
     return f"{x:,.0f} Ft".replace(",", " ")
 
+
 def validate_triangular_params(min_v, mode_v, max_v, name: str):
-    ok = (min_v <= mode_v <= max_v)
+    ok = min_v <= mode_v <= max_v
     if not ok:
-        st.error(f"Hibás {name} paraméter: elvárt min ≤ mode ≤ max, de most: {min_v}, {mode_v}, {max_v}")
+        st.error(
+            f"Hibás {name} paraméter: elvárt min ≤ mode ≤ max, de most: {min_v}, {mode_v}, {max_v}"
+        )
     return ok
+
 
 # ----------------------------
 # Simulation core
@@ -55,24 +76,42 @@ def simulate_year(
     turnover_min: int,
     # Client base dynamics
     starting_active_clients: int,
-    churn_min: float, churn_mode: float, churn_max: float,
+    churn_min: float,
+    churn_mode: float,
+    churn_max: float,
     # Seasonal new clients
     new_min_by_month: np.ndarray,
     new_mode_by_month: np.ndarray,
     new_max_by_month: np.ndarray,
     # VPC mixture
-    vpc_p1: float, vpc_p15: float, vpc_p22: float,
-    vpc_1: float, vpc_15: float, vpc_22: float,
+    vpc_p1: float,
+    vpc_p15: float,
+    vpc_p22: float,
+    vpc_1: float,
+    vpc_15: float,
+    vpc_22: float,
     # Operational uncertainty
-    u_min: float, u_mode: float, u_max: float,
-    c_min: float, c_mode: float, c_max: float,
-    f_min: float, f_mode: float, f_max: float,
-    s_min: float, s_mode: float, s_max: float,
+    u_min: float,
+    u_mode: float,
+    u_max: float,
+    c_min: float,
+    c_mode: float,
+    c_max: float,
+    f_min: float,
+    f_mode: float,
+    f_max: float,
+    s_min: float,
+    s_mode: float,
+    s_max: float,
     # Price per completed visit
-    p_min: int, p_mode: int, p_max: int,
+    p_min: int,
+    p_mode: int,
+    p_max: int,
     # Marketing
     mkt_fixed_by_month: np.ndarray,  # len 12, Ft
-    cac_min: int, cac_mode: int, cac_max: int,
+    cac_min: int,
+    cac_mode: int,
+    cac_max: int,
 ) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
 
@@ -83,14 +122,18 @@ def simulate_year(
     max_clients_per_day = int(np.floor((hours_per_day * 60) / minutes_per_client))
     max_clients_per_day = max(max_clients_per_day, 0)
 
-    capacity_visits = working_days_per_month.astype(float) * max_clients_per_day  # len 12
+    capacity_visits = (
+        working_days_per_month.astype(float) * max_clients_per_day
+    )  # len 12
 
     # Random matrices (n_sims x 12)
     U = triangular_draw(rng, u_min, u_mode, u_max, size=(n_sims, 12))
     C = triangular_draw(rng, c_min, c_mode, c_max, size=(n_sims, 12))
     F = triangular_draw(rng, f_min, f_mode, f_max, size=(n_sims, 12))
     S = triangular_draw(rng, s_min, s_mode, s_max, size=(n_sims, 12))
-    P = triangular_draw(rng, float(p_min), float(p_mode), float(p_max), size=(n_sims, 12))
+    P = triangular_draw(
+        rng, float(p_min), float(p_mode), float(p_max), size=(n_sims, 12)
+    )
 
     CHURN = triangular_draw(rng, churn_min, churn_mode, churn_max, size=(n_sims, 12))
 
@@ -102,7 +145,7 @@ def simulate_year(
             float(new_min_by_month[m]),
             float(new_mode_by_month[m]),
             float(new_max_by_month[m]),
-            size=n_sims
+            size=n_sims,
         )
         NEW[:, m] = np.round(new_draw).astype(int)
         NEW[:, m] = np.clip(NEW[:, m], 0, None)
@@ -117,7 +160,9 @@ def simulate_year(
     VPC = rng.choice(choices, size=(n_sims, 12), p=probs)
 
     # CAC per new client (monthly)
-    CAC = triangular_draw(rng, float(cac_min), float(cac_mode), float(cac_max), size=(n_sims, 12))
+    CAC = triangular_draw(
+        rng, float(cac_min), float(cac_mode), float(cac_max), size=(n_sims, 12)
+    )
 
     # State + results arrays
     active = np.zeros((n_sims, 12), dtype=float)
@@ -138,10 +183,7 @@ def simulate_year(
 
         # Available visits given schedule + utilization + losses
         available_visits = (
-            capacity_visits[m] *
-            U[:, m] *
-            (1.0 - F[:, m]) *
-            (1.0 - S[:, m])
+            capacity_visits[m] * U[:, m] * (1.0 - F[:, m]) * (1.0 - S[:, m])
         )
 
         booked_visits = np.minimum(demand_visits, available_visits)
@@ -155,39 +197,37 @@ def simulate_year(
     # Monthly stats
     rows = []
     for m in range(12):
-        rows.append({
-            "month": MONTHS[m],
-
-            "new_clients_mean": float(np.mean(NEW[:, m])),
-            "new_clients_p10": pct(NEW[:, m], 10),
-            "new_clients_p50": pct(NEW[:, m], 50),
-            "new_clients_p90": pct(NEW[:, m], 90),
-
-            "active_clients_mean": float(np.mean(active[:, m])),
-            "active_clients_p10": pct(active[:, m], 10),
-            "active_clients_p50": pct(active[:, m], 50),
-            "active_clients_p90": pct(active[:, m], 90),
-
-            "completed_visits_mean": float(np.mean(completed_visits[:, m])),
-            "completed_visits_p10": pct(completed_visits[:, m], 10),
-            "completed_visits_p50": pct(completed_visits[:, m], 50),
-            "completed_visits_p90": pct(completed_visits[:, m], 90),
-
-            "revenue_mean_huf": float(np.mean(revenue[:, m])),
-            "revenue_p10_huf": pct(revenue[:, m], 10),
-            "revenue_p50_huf": pct(revenue[:, m], 50),
-            "revenue_p90_huf": pct(revenue[:, m], 90),
-
-            "mkt_cost_mean_huf": float(np.mean(marketing_cost[:, m])),
-            "mkt_cost_p10_huf": pct(marketing_cost[:, m], 10),
-            "mkt_cost_p50_huf": pct(marketing_cost[:, m], 50),
-            "mkt_cost_p90_huf": pct(marketing_cost[:, m], 90),
-
-            "profit_after_mkt_mean_huf": float(np.mean(profit_after_marketing[:, m])),
-            "profit_after_mkt_p10_huf": pct(profit_after_marketing[:, m], 10),
-            "profit_after_mkt_p50_huf": pct(profit_after_marketing[:, m], 50),
-            "profit_after_mkt_p90_huf": pct(profit_after_marketing[:, m], 90),
-        })
+        rows.append(
+            {
+                "month": MONTHS[m],
+                "new_clients_mean": float(np.mean(NEW[:, m])),
+                "new_clients_p10": pct(NEW[:, m], 10),
+                "new_clients_p50": pct(NEW[:, m], 50),
+                "new_clients_p90": pct(NEW[:, m], 90),
+                "active_clients_mean": float(np.mean(active[:, m])),
+                "active_clients_p10": pct(active[:, m], 10),
+                "active_clients_p50": pct(active[:, m], 50),
+                "active_clients_p90": pct(active[:, m], 90),
+                "completed_visits_mean": float(np.mean(completed_visits[:, m])),
+                "completed_visits_p10": pct(completed_visits[:, m], 10),
+                "completed_visits_p50": pct(completed_visits[:, m], 50),
+                "completed_visits_p90": pct(completed_visits[:, m], 90),
+                "revenue_mean_huf": float(np.mean(revenue[:, m])),
+                "revenue_p10_huf": pct(revenue[:, m], 10),
+                "revenue_p50_huf": pct(revenue[:, m], 50),
+                "revenue_p90_huf": pct(revenue[:, m], 90),
+                "mkt_cost_mean_huf": float(np.mean(marketing_cost[:, m])),
+                "mkt_cost_p10_huf": pct(marketing_cost[:, m], 10),
+                "mkt_cost_p50_huf": pct(marketing_cost[:, m], 50),
+                "mkt_cost_p90_huf": pct(marketing_cost[:, m], 90),
+                "profit_after_mkt_mean_huf": float(
+                    np.mean(profit_after_marketing[:, m])
+                ),
+                "profit_after_mkt_p10_huf": pct(profit_after_marketing[:, m], 10),
+                "profit_after_mkt_p50_huf": pct(profit_after_marketing[:, m], 50),
+                "profit_after_mkt_p90_huf": pct(profit_after_marketing[:, m], 90),
+            }
+        )
 
     df = pd.DataFrame(rows)
 
@@ -199,66 +239,90 @@ def simulate_year(
     annual_new = NEW.sum(axis=1)
     active_end = active[:, -1]
 
-    total = pd.DataFrame([{
-        "month": "TOTAL",
-
-        "new_clients_mean": float(np.mean(annual_new)),
-        "new_clients_p10": pct(annual_new, 10),
-        "new_clients_p50": pct(annual_new, 50),
-        "new_clients_p90": pct(annual_new, 90),
-
-        "active_clients_mean": float(np.mean(active_end)),
-        "active_clients_p10": pct(active_end, 10),
-        "active_clients_p50": pct(active_end, 50),
-        "active_clients_p90": pct(active_end, 90),
-
-        "completed_visits_mean": float(np.mean(annual_visits)),
-        "completed_visits_p10": pct(annual_visits, 10),
-        "completed_visits_p50": pct(annual_visits, 50),
-        "completed_visits_p90": pct(annual_visits, 90),
-
-        "revenue_mean_huf": float(np.mean(annual_revenue)),
-        "revenue_p10_huf": pct(annual_revenue, 10),
-        "revenue_p50_huf": pct(annual_revenue, 50),
-        "revenue_p90_huf": pct(annual_revenue, 90),
-
-        "mkt_cost_mean_huf": float(np.mean(annual_mkt)),
-        "mkt_cost_p10_huf": pct(annual_mkt, 10),
-        "mkt_cost_p50_huf": pct(annual_mkt, 50),
-        "mkt_cost_p90_huf": pct(annual_mkt, 90),
-
-        "profit_after_mkt_mean_huf": float(np.mean(annual_profit)),
-        "profit_after_mkt_p10_huf": pct(annual_profit, 10),
-        "profit_after_mkt_p50_huf": pct(annual_profit, 50),
-        "profit_after_mkt_p90_huf": pct(annual_profit, 90),
-    }])
+    total = pd.DataFrame(
+        [
+            {
+                "month": "TOTAL",
+                "new_clients_mean": float(np.mean(annual_new)),
+                "new_clients_p10": pct(annual_new, 10),
+                "new_clients_p50": pct(annual_new, 50),
+                "new_clients_p90": pct(annual_new, 90),
+                "active_clients_mean": float(np.mean(active_end)),
+                "active_clients_p10": pct(active_end, 10),
+                "active_clients_p50": pct(active_end, 50),
+                "active_clients_p90": pct(active_end, 90),
+                "completed_visits_mean": float(np.mean(annual_visits)),
+                "completed_visits_p10": pct(annual_visits, 10),
+                "completed_visits_p50": pct(annual_visits, 50),
+                "completed_visits_p90": pct(annual_visits, 90),
+                "revenue_mean_huf": float(np.mean(annual_revenue)),
+                "revenue_p10_huf": pct(annual_revenue, 10),
+                "revenue_p50_huf": pct(annual_revenue, 50),
+                "revenue_p90_huf": pct(annual_revenue, 90),
+                "mkt_cost_mean_huf": float(np.mean(annual_mkt)),
+                "mkt_cost_p10_huf": pct(annual_mkt, 10),
+                "mkt_cost_p50_huf": pct(annual_mkt, 50),
+                "mkt_cost_p90_huf": pct(annual_mkt, 90),
+                "profit_after_mkt_mean_huf": float(np.mean(annual_profit)),
+                "profit_after_mkt_p10_huf": pct(annual_profit, 10),
+                "profit_after_mkt_p50_huf": pct(annual_profit, 50),
+                "profit_after_mkt_p90_huf": pct(annual_profit, 90),
+            }
+        ]
+    )
 
     return pd.concat([df, total], ignore_index=True)
+
 
 # ----------------------------
 # Streamlit App
 # ----------------------------
-st.set_page_config(page_title="Masszőr bevétel előrejelzés – Monte Carlo", layout="wide")
+st.set_page_config(
+    page_title="Masszőr bevétel előrejelzés – Monte Carlo", layout="wide"
+)
 st.title("Masszőr bevétel előrejelzés – Monte Carlo")
-st.caption("Havi bontás • Szezonális új ügyfelek • Marketing költség (fix + CAC) • Lemorzsolódás • Kapacitáskorlát")
+st.caption(
+    "Havi bontás • Szezonális új ügyfelek • Marketing költség (fix + CAC) • Lemorzsolódás • Kapacitáskorlát"
+)
 
 # Defaults
 default_work_days = [21, 20, 23, 21, 22, 21, 23, 21, 22, 23, 20, 21]
 default_new = {
-    "min":  [8,  8, 10, 12, 12, 10,  8,  8, 10, 12, 12, 10],
-    "mode": [15,15,18, 20, 20, 18, 15, 15, 18, 20, 20, 18],
-    "max":  [25,25,30, 35, 35, 30, 25, 25, 30, 35, 35, 30],
+    "min": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    "mode": [3, 3, 3, 4, 4, 5, 6, 6, 6, 4, 6, 5],
+    "max": [10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10],
 }
-default_mkt_fixed = [50_000, 50_000, 60_000, 60_000, 60_000, 50_000, 40_000, 40_000, 50_000, 60_000, 60_000, 60_000]
+default_mkt_fixed = [
+    50_000,
+    50_000,
+    60_000,
+    60_000,
+    60_000,
+    50_000,
+    40_000,
+    40_000,
+    50_000,
+    60_000,
+    60_000,
+    60_000,
+]
 
 with st.sidebar:
     st.header("Beállítások")
 
-    # Use a FORM so the submit is stable + only recompute when user clicks run
+    # FORM -> stable run button
     with st.form("params_form", border=False):
         st.subheader("Szimuláció")
-        n_sims = st.number_input("Szimulációk száma", min_value=5_000, max_value=500_000, value=100_000, step=5_000)
-        seed = st.number_input("Seed", min_value=0, max_value=10_000_000, value=123, step=1)
+        n_sims = st.number_input(
+            "Szimulációk száma",
+            min_value=5_000,
+            max_value=500_000,
+            value=100_000,
+            step=5_000,
+        )
+        seed = st.number_input(
+            "Seed", min_value=0, max_value=10_000_000, value=123, step=1
+        )
 
         st.divider()
         st.subheader("Kapacitás")
@@ -271,12 +335,22 @@ with st.sidebar:
         cols = st.columns(3)
         for i in range(12):
             with cols[i % 3]:
-                wd.append(st.number_input(f"{MONTHS[i]} munkanap", min_value=0, max_value=31, value=default_work_days[i], step=1))
+                wd.append(
+                    st.number_input(
+                        f"{MONTHS[i]} munkanap",
+                        min_value=0,
+                        max_value=31,
+                        value=default_work_days[i],
+                        step=1,
+                    )
+                )
         working_days_per_month = np.array(wd, dtype=int)
 
         st.divider()
         st.subheader("Ügyfélbázis")
-        starting_active_clients = st.number_input("Induló aktív ügyfelek", min_value=0, max_value=20_000, value=40, step=1)
+        starting_active_clients = st.number_input(
+            "Induló aktív ügyfelek", min_value=0, max_value=20_000, value=0, step=1
+        )
 
         st.caption("Lemorzsolódás / hó (Triangular)")
         churn_min = st.slider("CHURN min", 0.0, 0.6, 0.08, 0.01)
@@ -299,18 +373,42 @@ with st.sidebar:
         with grid[1]:
             st.markdown("**min**")
             for i in range(12):
-                new_min_by_month.append(st.number_input(f"new_min_{i}", label_visibility="collapsed",
-                                                        min_value=0, max_value=500, value=default_new["min"][i], step=1))
+                new_min_by_month.append(
+                    st.number_input(
+                        f"new_min_{i}",
+                        label_visibility="collapsed",
+                        min_value=0,
+                        max_value=500,
+                        value=default_new["min"][i],
+                        step=1,
+                    )
+                )
         with grid[2]:
             st.markdown("**mode**")
             for i in range(12):
-                new_mode_by_month.append(st.number_input(f"new_mode_{i}", label_visibility="collapsed",
-                                                         min_value=0, max_value=500, value=default_new["mode"][i], step=1))
+                new_mode_by_month.append(
+                    st.number_input(
+                        f"new_mode_{i}",
+                        label_visibility="collapsed",
+                        min_value=0,
+                        max_value=500,
+                        value=default_new["mode"][i],
+                        step=1,
+                    )
+                )
         with grid[3]:
             st.markdown("**max**")
             for i in range(12):
-                new_max_by_month.append(st.number_input(f"new_max_{i}", label_visibility="collapsed",
-                                                        min_value=0, max_value=500, value=default_new["max"][i], step=1))
+                new_max_by_month.append(
+                    st.number_input(
+                        f"new_max_{i}",
+                        label_visibility="collapsed",
+                        min_value=0,
+                        max_value=500,
+                        value=default_new["max"][i],
+                        step=1,
+                    )
+                )
 
         new_min_by_month = np.array(new_min_by_month, dtype=int)
         new_mode_by_month = np.array(new_mode_by_month, dtype=int)
@@ -323,14 +421,27 @@ with st.sidebar:
         cols2 = st.columns(3)
         for i in range(12):
             with cols2[i % 3]:
-                mkt_fixed.append(st.number_input(f"{MONTHS[i]} fix mkt", min_value=0, max_value=10_000_000,
-                                                 value=default_mkt_fixed[i], step=5_000))
+                mkt_fixed.append(
+                    st.number_input(
+                        f"{MONTHS[i]} fix mkt",
+                        min_value=0,
+                        max_value=10_000_000,
+                        value=default_mkt_fixed[i],
+                        step=5_000,
+                    )
+                )
         mkt_fixed_by_month = np.array(mkt_fixed, dtype=int)
 
         st.caption("CAC / új ügyfél (Triangular, Ft)")
-        cac_min = st.number_input("CAC min", min_value=0, max_value=500_000, value=2_000, step=500)
-        cac_mode = st.number_input("CAC mode", min_value=0, max_value=500_000, value=4_000, step=500)
-        cac_max = st.number_input("CAC max", min_value=0, max_value=500_000, value=8_000, step=500)
+        cac_min = st.number_input(
+            "CAC min", min_value=0, max_value=500_000, value=2_000, step=500
+        )
+        cac_mode = st.number_input(
+            "CAC mode", min_value=0, max_value=500_000, value=4_000, step=500
+        )
+        cac_max = st.number_input(
+            "CAC max", min_value=0, max_value=500_000, value=8_000, step=500
+        )
 
         st.divider()
         st.subheader("Ismétlődés (alkalom / aktív ügyfél / hó)")
@@ -366,15 +477,19 @@ with st.sidebar:
 
         st.divider()
         st.subheader("Ár/alkalom (Triangular, Ft)")
-        p_min = st.number_input("P min", min_value=0, max_value=200_000, value=13_500, step=500)
-        p_mode = st.number_input("P mode", min_value=0, max_value=200_000, value=15_000, step=500)
-        p_max = st.number_input("P max", min_value=0, max_value=200_000, value=16_500, step=500)
+        p_min = st.number_input(
+            "P min", min_value=0, max_value=200_000, value=13_500, step=500
+        )
+        p_mode = st.number_input(
+            "P mode", min_value=0, max_value=200_000, value=15_000, step=500
+        )
+        p_max = st.number_input(
+            "P max", min_value=0, max_value=200_000, value=16_500, step=500
+        )
 
         submitted = st.form_submit_button("Szimuláció futtatása", type="primary")
 
-# ----------------------------
 # Run simulation on submit + store result
-# ----------------------------
 if submitted:
     ok = True
     ok &= validate_triangular_params(u_min, u_mode, u_max, "U")
@@ -384,111 +499,137 @@ if submitted:
     ok &= validate_triangular_params(churn_min, churn_mode, churn_max, "CHURN")
     ok &= validate_triangular_params(p_min, p_mode, p_max, "P (ár)")
     ok &= validate_triangular_params(cac_min, cac_mode, cac_max, "CAC")
-
     for i in range(12):
-        ok &= validate_triangular_params(new_min_by_month[i], new_mode_by_month[i], new_max_by_month[i], f"NEW ({MONTHS[i]})")
+        ok &= validate_triangular_params(
+            new_min_by_month[i],
+            new_mode_by_month[i],
+            new_max_by_month[i],
+            f"NEW ({MONTHS[i]})",
+        )
 
     if ok:
         with st.spinner("Szimuláció futtatása..."):
             df = simulate_year(
                 n_sims=int(n_sims),
                 seed=int(seed),
-
                 working_days_per_month=working_days_per_month,
                 hours_per_day=int(hours_per_day),
                 service_min=int(service_min),
                 turnover_min=int(turnover_min),
-
                 starting_active_clients=int(starting_active_clients),
-
                 churn_min=float(churn_min),
                 churn_mode=float(churn_mode),
                 churn_max=float(churn_max),
-
                 new_min_by_month=new_min_by_month,
                 new_mode_by_month=new_mode_by_month,
                 new_max_by_month=new_max_by_month,
-
                 vpc_p1=float(vpc_p1),
                 vpc_p15=float(vpc_p15),
                 vpc_p22=float(vpc_p22),
                 vpc_1=float(vpc_1),
                 vpc_15=float(vpc_15),
                 vpc_22=float(vpc_22),
-
-                u_min=float(u_min), u_mode=float(u_mode), u_max=float(u_max),
-                c_min=float(c_min), c_mode=float(c_mode), c_max=float(c_max),
-                f_min=float(f_min), f_mode=float(f_mode), f_max=float(f_max),
-                s_min=float(s_min), s_mode=float(s_mode), s_max=float(s_max),
-
-                p_min=int(p_min), p_mode=int(p_mode), p_max=int(p_max),
-
+                u_min=float(u_min),
+                u_mode=float(u_mode),
+                u_max=float(u_max),
+                c_min=float(c_min),
+                c_mode=float(c_mode),
+                c_max=float(c_max),
+                f_min=float(f_min),
+                f_mode=float(f_mode),
+                f_max=float(f_max),
+                s_min=float(s_min),
+                s_mode=float(s_mode),
+                s_max=float(s_max),
+                p_min=int(p_min),
+                p_mode=int(p_mode),
+                p_max=int(p_max),
                 mkt_fixed_by_month=mkt_fixed_by_month,
-                cac_min=int(cac_min), cac_mode=int(cac_mode), cac_max=int(cac_max),
+                cac_min=int(cac_min),
+                cac_mode=int(cac_mode),
+                cac_max=int(cac_max),
             )
         st.session_state["df"] = df
 
-# ----------------------------
-# Display results (if available)
-# ----------------------------
+# Display results
 if "df" not in st.session_state:
-    st.info("Állítsd be a paramétereket a bal oldali sávban, majd kattints: **Szimuláció futtatása**.")
+    st.info(
+        "Állítsd be a paramétereket a bal oldali sávban, majd kattints: **Szimuláció futtatása**."
+    )
 else:
     df = st.session_state["df"]
     total = df[df["month"] == "TOTAL"].iloc[0]
 
-    # Top KPIs
     k1, k2, k3, k4 = st.columns(4)
     with k1:
         st.metric("Éves bevétel (P50)", format_huf(total["revenue_p50_huf"]))
     with k2:
         st.metric("Éves marketing (P50)", format_huf(total["mkt_cost_p50_huf"]))
     with k3:
-        st.metric("Éves eredmény marketing után (P50)", format_huf(total["profit_after_mkt_p50_huf"]))
+        st.metric(
+            "Éves eredmény marketing után (P50)",
+            format_huf(total["profit_after_mkt_p50_huf"]),
+        )
     with k4:
         st.metric(
             "Eredmény marketing után (P10–P90)",
-            f"{format_huf(total['profit_after_mkt_p10_huf'])} – {format_huf(total['profit_after_mkt_p90_huf'])}"
+            f"{format_huf(total['profit_after_mkt_p10_huf'])} – {format_huf(total['profit_after_mkt_p90_huf'])}",
         )
 
     st.divider()
 
-    # Capacity summary
     minutes_per_client = int(service_min + turnover_min)
-    max_clients_per_day = int(np.floor((hours_per_day * 60) / minutes_per_client)) if minutes_per_client > 0 else 0
+    max_clients_per_day = (
+        int(np.floor((hours_per_day * 60) / minutes_per_client))
+        if minutes_per_client > 0
+        else 0
+    )
     st.caption(
         f"Kapacitás: {hours_per_day} óra/nap • {minutes_per_client} perc/ügyfél → "
         f"{max_clients_per_day} ügyfél/nap max • éves elméleti max alkalom ≈ {(working_days_per_month.sum() * max_clients_per_day):,}"
     )
 
-    # Table (keep it readable)
     st.subheader("Havi eredmények (eloszlás statisztikák)")
     show = df.copy()
     money_cols = [c for c in show.columns if c.endswith("_huf")]
     for c in money_cols:
         show[c] = show[c].round(0).astype(int)
-
     st.dataframe(show, use_container_width=True, hide_index=True)
 
     st.divider()
 
-    # Charts
     dfm = df[df["month"] != "TOTAL"].set_index("month")
 
     st.subheader("Grafikonok")
-
     st.markdown("**Bevétel (P10 / P50 / P90)**")
-    st.line_chart(dfm[["revenue_p10_huf", "revenue_p50_huf", "revenue_p90_huf"]], height=260)
+    st.line_chart(
+        dfm[["revenue_p10_huf", "revenue_p50_huf", "revenue_p90_huf"]], height=260
+    )
 
     st.markdown("**Marketing költség (P10 / P50 / P90)**")
-    st.line_chart(dfm[["mkt_cost_p10_huf", "mkt_cost_p50_huf", "mkt_cost_p90_huf"]], height=260)
+    st.line_chart(
+        dfm[["mkt_cost_p10_huf", "mkt_cost_p50_huf", "mkt_cost_p90_huf"]], height=260
+    )
 
     st.markdown("**Eredmény marketing után (P10 / P50 / P90)**")
-    st.line_chart(dfm[["profit_after_mkt_p10_huf", "profit_after_mkt_p50_huf", "profit_after_mkt_p90_huf"]], height=260)
+    st.line_chart(
+        dfm[
+            [
+                "profit_after_mkt_p10_huf",
+                "profit_after_mkt_p50_huf",
+                "profit_after_mkt_p90_huf",
+            ]
+        ],
+        height=260,
+    )
 
     st.markdown("**Új ügyfelek és aktív bázis (P50)**")
     st.line_chart(dfm[["new_clients_p50", "active_clients_p50"]], height=260)
 
-    # Download CSV
     csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button("Eredmények letöltése CSV-ben", data=csv, file_name="monte_carlo_massage_forecast.csv", mime="text/csv")
+    st.download_button(
+        "Eredmények letöltése CSV-ben",
+        data=csv,
+        file_name="monte_carlo_massage_forecast.csv",
+        mime="text/csv",
+    )
